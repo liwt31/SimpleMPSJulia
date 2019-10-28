@@ -1,7 +1,7 @@
 # SimpleMPSJulia
 # Density matrix renormalization group (DMRG) in matrix product state (MPS)
 
-# This file contains the defination of Heisenberg in MPO structure
+# This file contains the defination of the Heisenberg model in MPO structure
 # and solves its ground state
 using LinearAlgebra
 

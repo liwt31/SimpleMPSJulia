@@ -54,7 +54,7 @@ struct MatrixProductState <: MatrixProduct
         # Firstly randomly fill in the matrices
         mp = [rand(bond_dim[i], pdim[i], bond_dim[i+1]) for i in 1:length(mpo)]
         mps = new(mp)
-        # Then perform canonicalisation
+        # Then perform canonicalisation (and normalization)
         for i in 1:length(mpo)-1
             push_center!(mps, i)
         end
@@ -91,7 +91,7 @@ Calculate environment on the next site based on previous environment `res`
 function update_env(res, ms, mo)
     """
     Graphical notation: (* for MPS and # for MPO)
-    *--a-- --e
+    *--a--*--e
     |     |
     |     d
     |     |
@@ -106,7 +106,7 @@ end
 
 
 """
-Calculate an array of left-side enrivonment tensor based on MPS and MPO.
+Calculate an array of left-side enrivonment tensor based on `mps` and `mpo`.
 The index `i` of the array represents the left environment of the `i`th site of the MPS.
 """
 function get_env(mps::MatrixProductState, mpo::MatrixProductOperator)::Array{Array}
@@ -121,7 +121,7 @@ function get_env(mps::MatrixProductState, mpo::MatrixProductOperator)::Array{Arr
 end
 
 """
-Calculate the expectation value <mps|mpo|mps>
+Calculate the expectation value <mps|mpo|mps> assuming `mps` is normalized
 """
 function expectation(mps::MatrixProductState, mpo::MatrixProductOperator)::AbstractFloat
     return get_env(mps, mpo)[end-1][1][1][1]
@@ -131,7 +131,7 @@ end
 Sweep `mps` from left to right to find the ground state of the Hamiltonian `mpo`.
 The `mps` should be right-canonical
 The energies calculatd during the sweep are appended to `energies`
-and `env` is pass in as the environment from the right side
+and `env` is passed in as the environment from the right side
 """
 function optimize_oneround!(mps::MatrixProductState, mpo::MatrixProductOperator, energies::Array, env::Array)
     sentinel = ones(1, 1, 1)
@@ -145,10 +145,10 @@ function optimize_oneround!(mps::MatrixProductState, mpo::MatrixProductOperator,
         orig_shape = size(mps.mp[cur_idx])
         # don't optimize on the first site because it has probably been optmized during the previous sweep
         if cur_idx != 1
-            # find the lowest eigen value of the local Hamitonian operator.
+            # find the lowest eigenvalue of the local Hamitonian operator.
             # The computation can be accelerated by using a "sparse" representation of the operator
-            # because some eigen solver (such as `lobpcg` in this case) only need to know what would happen
-            # if the operator is applied on a certain matrix.
+            # because some eigensolvers (such as `lobpcg` in this case) only need to know what would happen
+            # if the operator(matrix) is applied on a certain state(vector).
             # See [power method](https://en.wikipedia.org/wiki/Power_iteration) as an example
             function h_map_f(ms)
                 ms = reshape(ms, orig_shape)
@@ -167,15 +167,14 @@ function optimize_oneround!(mps::MatrixProductState, mpo::MatrixProductOperator,
                 @tensor res[a, f, h] := l[a, b, c] * ms[c, d, e] * mo[b, f, d, g] * r[h, g, e]
                 return res
             end
-
+            # some boilerplate to call the eigensolver
             new_dim = prod(orig_shape)
-
             h_map = LinearMap(h_map_f, new_dim, new_dim, issymmetric=true)
+            # find the eigenvalue and eigenstate
             lobpcg_res = lobpcg(h_map, false, reshape(mps.mp[cur_idx], new_dim), 1)
+            # update variables based on the result
             new_energy = lobpcg_res.λ[1]
-
             push!(energies, new_energy)
-
             mps.mp[cur_idx] = reshape(lobpcg_res.X, orig_shape)
         end
 
@@ -197,6 +196,7 @@ end
 Find the ground state of the Hamiltonian `mpo`
 """
 function search_groundstate(mpo::MatrixProductOperator, bond_dimension::Int=20)
+    # random initial guess
     mps = MatrixProductState(mpo, bond_dimension)
     l_env = get_env(mps, mpo)
     energies = [expectation(mps, mpo)]
